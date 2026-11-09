@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TASIN FX | Live Signals</title>
+<style>
+:root{--bg:#080d18;--panel:#111b2c;--line:#293750;--text:#edf3ff;--muted:#9baac2;--gold:#e8b84d;--green:#24c58a;--red:#ff647c}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#182642,#080d18 58%);color:var(--text);font-family:Arial, sans-serif}
+main{max-width:1100px;margin:auto;padding:26px 18px 50px}.head{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:20px}
+.brand{display:flex;gap:12px;align-items:center}.logo{width:46px;height:46px;border-radius:13px;background:linear-gradient(140deg,#f4d27c,#9d6b18);display:grid;place-items:center;color:#101522;font-weight:900}.brand h1{margin:0;font-size:23px;letter-spacing:2px}.brand small{color:var(--gold);letter-spacing:1.5px;font-size:10px}
+.tag{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:25px;padding:9px 12px}
+.intro{padding:30px 0 22px}.intro small{color:var(--gold);letter-spacing:2px}.intro h2{font-size:clamp(28px,5vw,42px);margin:10px 0}.intro p{color:var(--muted);line-height:1.6;max-width:700px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:17px}.card{background:linear-gradient(150deg,#152239,#0e1727);border:1px solid var(--line);border-radius:17px;padding:21px}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center}.name{font-weight:800;font-size:17px}.symbol{font-size:12px;color:var(--muted);margin-top:5px}
+.badge{font-size:10px;letter-spacing:1px;border-radius:30px;padding:7px 10px;background:#202b3e;border:1px solid #34425b;color:#c4d0e3}.badge.buy{color:var(--green);border-color:#1d7359}.badge.sell{color:var(--red);border-color:#873e50}
+.price{font-size:30px;font-weight:800;margin:24px 0 5px}.muted{color:var(--muted);font-size:11px}
+.signal{margin-top:20px;padding:16px;border:1px dashed #43516a;border-radius:12px;background:#0a1423}.signal strong{font-size:13px}.signal p{color:var(--muted);font-size:13px;line-height:1.5;margin:8px 0 0}
+.levels{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:15px}.level{background:#0a1220;border:1px solid #23324a;border-radius:10px;padding:11px}.level small{display:block;color:var(--muted);font-size:10px;margin-bottom:6px}.level b{font-size:13px}
+.controls{display:flex;gap:10px;align-items:center;margin:18px 0;flex-wrap:wrap}.btn{background:var(--gold);border:0;border-radius:9px;padding:10px 15px;font-weight:800;cursor:pointer;color:#17130b}.footnote{margin-top:18px;border:1px solid #5b4828;background:#1a1b20;color:#ddc99a;padding:14px;border-radius:11px;font-size:12px;line-height:1.6}
+#err{color:#ff9aaa;font-size:12px;line-height:1.5}footer{margin-top:26px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}
+@media(max-width:680px){.grid{grid-template-columns:1fr}.card{padding:17px}}
+</style></head><body><main>
+<header class="head"><div class="brand"><div class="logo">TF</div><div><h1>TASIN FX</h1><small>PRECISION · DISCIPLINE · RISK CONTROL</small></div></div><div class="tag">LIVE SIGNAL ENGINE · BETA</div></header>
+<section class="intro"><small>GOLD & FOREX MARKET WATCH</small><h2>Wait for confirmation.<br><span style="color:var(--gold)">Trade with a plan.</span></h2><p>5-minute setup checks with 15-minute trend confirmation. The engine can return NO TRADE; it does not force a daily signal.</p></section>
+<div class="controls"><button class="btn" id="refresh">Refresh signals</button><span class="muted" id="updated">Waiting for server data…</span></div>
+<div id="err"></div><section class="grid" id="cards"></section>
+<div class="footnote"><b>Important:</b> This is an experimental rule-based signal engine, not a proven profitable strategy. It checks completed candles, a recent liquidity sweep, a simple close-confirmation and 15M EMA alignment, during New York 08:00–11:00. It does not guarantee accuracy or daily trades. Verify broker-specific prices/spread and forward-test on demo before risking money. Data may be delayed or unavailable depending on your provider plan.</div>
+<footer>© 2026 TASIN FX · Data provider: Twelve Data · Signals are analysis only, no orders are placed.</footer>
+</main><script>
+const cards=document.getElementById('cards'),err=document.getElementById('err'),updated=document.getElementById('updated');
+function card(x){const s=x.signal||{},side=s.side||'NO TRADE',cls=side==='BUY'?'buy':side==='SELL'?'sell':'';
+return `<article class="card"><div class="row"><div><div class="name">${x.name}</div><div class="symbol">${x.symbol}</div></div><span class="badge ${cls}">${side}</span></div>
+<div class="price">${s.price??'— — —'}</div><div class="muted">Latest completed 5M close · ${s.time??'No candle timestamp'}</div>
+<div class="signal"><strong>${side==='NO TRADE'?'WAIT FOR SETUP':side+' SETUP'}</strong><p>${s.reason??'Signal unavailable.'}</p></div>
+<div class="levels"><div class="level"><small>ENTRY</small><b>${s.entry??'—'}</b></div><div class="level"><small>STOP LOSS</small><b>${s.sl??'—'}</b></div><div class="level"><small>TAKE PROFIT</small><b>${s.tp??'—'}</b></div></div>
+<div class="muted" style="margin-top:12px">Risk/Reward ${s.rr??'—'} · ${x.source??'Data source'} </div></article>`}
+async function load(){err.textContent='';updated.textContent='Checking market data…';try{const r=await fetch('/api/status');const j=await r.json();if(!r.ok)throw new Error(j.error+(j.hint?' — '+j.hint:''));cards.innerHTML=j.data.map(card).join('');updated.textContent='Updated: '+new Date(j.checkedAt).toLocaleString();}catch(e){err.textContent=e.message;updated.textContent='Data unavailable';}}
+document.getElementById('refresh').addEventListener('click',load);load();setInterval(load,60000);
+</script></body></html>
