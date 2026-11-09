@@ -1,8 +1,8 @@
 
 import express from "express";
 import dotenv from "dotenv";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 dotenv.config();
 
@@ -14,22 +14,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.join(__dirname, "public");
 
-// Serve website files
+// Serve public website files
 app.use(express.static(PUBLIC_DIR));
 
-// Explicit homepage route
-app.get("/", (_req, res) => {
+// Homepage
+app.get("/", (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));
 });
 
+// Supported trading symbols
 const symbols = [
   { key: "XAUUSD", api: "XAU/USD", name: "Gold", digits: 2 },
   { key: "EURUSD", api: "EUR/USD", name: "EUR/USD", digits: 5 }
 ];
 
 const cache = new Map();
-const CACHE_MS = 60_000;
+const CACHE_MS = 60000;
 
+// Fetch market candles
 async function candles(symbol, interval) {
   const cacheKey = `${symbol}:${interval}`;
   const cached = cache.get(cacheKey);
@@ -39,6 +41,7 @@ async function candles(symbol, interval) {
   }
 
   const url = new URL("https://api.twelvedata.com/time_series");
+
   url.searchParams.set("symbol", symbol);
   url.searchParams.set("interval", interval);
   url.searchParams.set("outputsize", "120");
@@ -54,9 +57,7 @@ async function candles(symbol, interval) {
   const payload = await response.json();
 
   if (payload.status === "error" || !Array.isArray(payload.values)) {
-    throw new Error(
-      payload.message || `No ${interval} data returned for ${symbol}`
-    );
+    throw new Error(payload.message || "Market data unavailable");
   }
 
   const data = payload.values.map(v => ({
@@ -72,14 +73,14 @@ async function candles(symbol, interval) {
   return data;
 }
 
+// EMA calculation
 function ema(values, period) {
   if (values.length < period) return null;
 
   const k = 2 / (period + 1);
 
-  let result = values
-    .slice(0, period)
-    .reduce((a, b) => a + b, 0) / period;
+  let result =
+    values.slice(0, period).reduce((a, b) => a + b, 0) / period;
 
   for (let i = period; i < values.length; i++) {
     result = values[i] * k + result * (1 - k);
@@ -88,6 +89,7 @@ function ema(values, period) {
   return result;
 }
 
+// ATR calculation
 function atr(bars, period = 14) {
   if (bars.length < period + 1) return null;
 
@@ -97,18 +99,17 @@ function atr(bars, period = 14) {
     const b = bars[i];
     const prev = bars[i - 1];
 
-    trs.push(
-      Math.max(
-        b.high - b.low,
-        Math.abs(b.high - prev.close),
-        Math.abs(b.low - prev.close)
-      )
-    );
+    trs.push(Math.max(
+      b.high - b.low,
+      Math.abs(b.high - prev.close),
+      Math.abs(b.low - prev.close)
+    ));
   }
 
   return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
+// New York session filter
 function nySession(dateString) {
   try {
     const parts = new Intl.DateTimeFormat("en-US", {
@@ -117,9 +118,7 @@ function nySession(dateString) {
       hourCycle: "h23"
     }).formatToParts(new Date(dateString));
 
-    const hour = Number(
-      parts.find(p => p.type === "hour")?.value
-    );
+    const hour = Number(parts.find(p => p.type === "hour")?.value);
 
     return hour >= 8 && hour < 11;
   } catch {
@@ -127,23 +126,18 @@ function nySession(dateString) {
   }
 }
 
+// Signal engine
 function makeSignal(m5, m15, digits) {
-  if (m5.length < 40 || m15.length < 30) {
+  if (m5.length < 40 || m15.length < 55) {
     return {
       side: "NO TRADE",
       reason: "Not enough candles to confirm setup."
     };
   }
 
+  // Ignore currently forming candles
   const bars = m5.slice(0, -1);
   const htf = m15.slice(0, -1);
-
-  if (bars.length < 30 || htf.length < 25) {
-    return {
-      side: "NO TRADE",
-      reason: "Waiting for completed candles."
-    };
-  }
 
   const last = bars[bars.length - 1];
   const prev = bars[bars.length - 2];
@@ -154,15 +148,17 @@ function makeSignal(m5, m15, digits) {
   const trendSlow = ema(closes15, 50);
   const volatility = atr(bars, 14);
 
-  if (
-    !trendFast ||
-    !trendSlow ||
-    !volatility ||
-    volatility <= 0
-  ) {
+  if (!trendFast || !trendSlow || !volatility || volatility <= 0) {
     return {
       side: "NO TRADE",
       reason: "Indicator data is incomplete."
+    };
+  }
+
+  if (!nySession(last.time)) {
+    return {
+      side: "NO TRADE",
+      reason: "Outside New York entry window (08:00–11:00 New York time)."
     };
   }
 
@@ -189,42 +185,27 @@ function makeSignal(m5, m15, digits) {
     trendFast < trendSlow &&
     last.close < trendFast;
 
-  const session = nySession(last.time);
-
-  if (!session) {
-    return {
-      side: "NO TRADE",
-      reason: "Outside New York entry window (08:00–11:00 New York time)."
-    };
-  }
-
   let side = "NO TRADE";
   let entry = null;
   let sl = null;
   let tp = null;
 
-  let reason =
-    "No confirmed sweep + structure break + 15M trend alignment.";
+  let reason = "No confirmed liquidity sweep and structure break.";
 
   if (sweepLow && bullish) {
     side = "BUY";
-
     entry = last.close;
     sl = Math.min(prev.low, last.low) - volatility * 0.25;
     tp = entry + (entry - sl) * 1.5;
 
-    reason =
-      "Bullish liquidity sweep, close confirmation and 15M EMA trend alignment.";
-
+    reason = "Bullish liquidity sweep and 15M trend confirmation.";
   } else if (sweepHigh && bearish) {
     side = "SELL";
-
     entry = last.close;
     sl = Math.max(prev.high, last.high) + volatility * 0.25;
     tp = entry - (sl - entry) * 1.5;
 
-    reason =
-      "Bearish liquidity sweep, close confirmation and 15M EMA trend alignment.";
+    reason = "Bearish liquidity sweep and 15M trend confirmation.";
   }
 
   const fmt = n => Number(n).toFixed(digits);
@@ -236,14 +217,14 @@ function makeSignal(m5, m15, digits) {
     tp: tp === null ? null : fmt(tp),
     rr: "1:1.5",
     time: last.time,
-    reason,
     price: fmt(last.close),
-    session: "New York 08:00–11:00"
+    session: "New York 08:00–11:00",
+    reason
   };
 }
 
-// Live signal API
-app.get("/api/status", async (_req, res) => {
+// API endpoint
+app.get("/api/status", async (req, res) => {
   if (!API_KEY) {
     return res.status(503).json({
       error: "API key missing. Add TWELVE_DATA_API_KEY in Render Environment."
@@ -275,14 +256,15 @@ app.get("/api/status", async (_req, res) => {
       provider: "Twelve Data"
     });
 
-  } catch (e) {
+  } catch (error) {
     res.status(502).json({
-      error: e.message,
-      hint: "Check API plan, API key and whether XAU/USD and EUR/USD are enabled for your account."
+      error: error.message,
+      hint: "Check Twelve Data API key and account access."
     });
   }
 });
 
+// Start server
 app.listen(PORT, () => {
   console.log(`TASIN FX running on port ${PORT}`);
 });
